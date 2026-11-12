@@ -21,13 +21,13 @@ import java.util.concurrent.Executors
  */
 class LocalAiManager(context: Context) {
     companion object {
-        const val MODEL_BYTES = 964_657_152L
+        const val MODEL_BYTES = 888_373_248L
         const val MODEL_URL =
-            "https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B_int8.litertlm"
+            "https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B_int8_gpu_composite_v0190.litertlm"
     }
 
     private val appContext = context.applicationContext
-    private val modelFile = File(appContext.filesDir, "jarvis-qwen35-08b-cpu.litertlm")
+    private val modelFile = File(appContext.filesDir, "jarvis-qwen35-08b-gpu.litertlm")
     private val client = OkHttpClient.Builder().build()
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private var engine: Engine? = null
@@ -68,7 +68,7 @@ class LocalAiManager(context: Context) {
                             output.fd.sync()
                         }
                     }
-                    if (temp.length() < 900_000_000L) {
+                    if (temp.length() < 850_000_000L) {
                         temp.delete()
                         error("The downloaded model file is incomplete.")
                     }
@@ -96,14 +96,41 @@ class LocalAiManager(context: Context) {
             loading = true
             try {
                 if (!isDownloaded()) error("Download the JARVIS AI model first.")
-                val newEngine = Engine(
-                    EngineConfig(
-                        modelPath = modelFile.absolutePath,
-                        backend = Backend.CPU(),
-                        cacheDir = File(appContext.cacheDir, "litert-cache").absolutePath
+                // Prefer the Galaxy S26 Ultra Adreno GPU; fall back to CPU if OpenCL is unavailable.
+                var newEngine: Engine? = null
+                var gpuFailure: Exception? = null
+                try {
+                    val gpuEngine = Engine(
+                        EngineConfig(
+                            modelPath = modelFile.absolutePath,
+                            backend = Backend.GPU(),
+                            cacheDir = File(appContext.cacheDir, "litert-cache-gpu").absolutePath
+                        )
                     )
-                )
-                newEngine.initialize()
+                    gpuEngine.initialize()
+                    newEngine = gpuEngine
+                } catch (e: Exception) {
+                    gpuFailure = e
+                }
+                if (newEngine == null) {
+                    val cpuEngine = Engine(
+                        EngineConfig(
+                            modelPath = modelFile.absolutePath,
+                            backend = Backend.CPU(),
+                            cacheDir = File(appContext.cacheDir, "litert-cache-cpu").absolutePath
+                        )
+                    )
+                    try {
+                        cpuEngine.initialize()
+                        newEngine = cpuEngine
+                    } catch (cpuError: Exception) {
+                        throw IllegalStateException(
+                            "GPU start failed: " + (gpuFailure?.message ?: "unavailable") +
+                                ". CPU fallback failed: " + (cpuError.message ?: "unknown error"),
+                            cpuError
+                        )
+                    }
+                }
                 val config = ConversationConfig(
                     systemInstruction = Contents.of(
                         "You are JARVIS, a personal AI assistant. Speak in polished, natural British English. " +
