@@ -328,8 +328,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onInit(result: Int) {
         if (result == TextToSpeech.SUCCESS) {
-            tts.language = Locale.UK
-            tts.setSpeechRate(0.92f)
+            // Prefer an installed British English masculine voice where available.
+            val britishMaleVoice = tts.voices
+                ?.filter { it.locale.language == "en" && it.locale.country == "GB" && !it.isNetworkConnectionRequired }
+                ?.firstOrNull { it.name.contains("rjs", ignoreCase = true) || it.name.contains("male", ignoreCase = true) }
+            if (britishMaleVoice != null) {
+                tts.voice = britishMaleVoice
+                tts.setPitch(0.88f)
+            } else {
+                tts.language = Locale.UK
+                tts.setPitch(0.82f)
+            }
+            tts.setSpeechRate(0.88f)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
                 override fun onDone(utteranceId: String?) {
