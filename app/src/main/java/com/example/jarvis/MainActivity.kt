@@ -321,7 +321,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             this.progress = 0
         }
         val message = TextView(this).apply {
-            text = "Download the free JARVIS AI model (approximately 965 MB). Wi-Fi is recommended. Once downloaded, it runs on this phone without an internet connection."
+            text = "Download the free JARVIS AI model (approximately 888 MB). Wi-Fi is recommended. Once downloaded, it runs on this phone without an internet connection."
             textSize = 13f
             setTextColor(Color.DKGRAY)
             setPadding(0, 0, 0, dp(12))
