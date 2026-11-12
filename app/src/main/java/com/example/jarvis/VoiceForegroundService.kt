@@ -11,7 +11,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.PowerManager
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -37,7 +36,6 @@ class VoiceForegroundService : Service(), TextToSpeech.OnInitListener {
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ai: LocalAiManager? = null
-    private var wakeLock: PowerManager.WakeLock? = null
     private var listening = false
     private var commandMode = false
     private var speaking = false
@@ -48,11 +46,6 @@ class VoiceForegroundService : Service(), TextToSpeech.OnInitListener {
         createNotificationChannel()
         tts = TextToSpeech(this, this)
         ai = LocalAiManager(this)
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "JARVIS:VoiceListening").apply {
-            setReferenceCounted(false)
-            acquire()
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -260,8 +253,6 @@ class VoiceForegroundService : Service(), TextToSpeech.OnInitListener {
         tts = null
         ai?.close()
         ai = null
-        try { wakeLock?.release() } catch (_: Exception) {}
-        wakeLock = null
         super.onDestroy()
     }
 
