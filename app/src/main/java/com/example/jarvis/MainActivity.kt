@@ -18,6 +18,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.*
 import androidx.core.app.ActivityCompat
@@ -86,7 +87,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(17), dp(13), dp(17), dp(18)); setBackgroundColor(bg)
         }
-        scroll.addView(page, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(page, ViewGroup.LayoutParams(-1, -2))
 
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(TextView(this).apply {
@@ -129,7 +130,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val logScroll = ScrollView(this).apply {
             isFillViewport = true; overScrollMode = View.OVER_SCROLL_NEVER
-            addView(transcript, ScrollView.LayoutParams(-1, -2))
+            addView(transcript, ViewGroup.LayoutParams(-1, -2))
         }
         transcriptScroll = logScroll
         logCard.addView(logScroll, LinearLayout.LayoutParams(-1, dp(118)))
