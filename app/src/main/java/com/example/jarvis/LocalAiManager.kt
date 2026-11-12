@@ -21,13 +21,13 @@ import java.util.concurrent.Executors
  */
 class LocalAiManager(context: Context) {
     companion object {
-        const val MODEL_BYTES = 888_273_664L
+        const val MODEL_BYTES = 964_657_152L
         const val MODEL_URL =
-            "https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B_int8_gpu_composite_v0190.litertlm"
+            "https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B_int8.litertlm"
     }
 
     private val appContext = context.applicationContext
-    private val modelFile = File(appContext.filesDir, "jarvis-qwen35-08b.litertlm")
+    private val modelFile = File(appContext.filesDir, "jarvis-qwen35-08b-cpu.litertlm")
     private val client = OkHttpClient.Builder().build()
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private var engine: Engine? = null
@@ -68,7 +68,7 @@ class LocalAiManager(context: Context) {
                             output.fd.sync()
                         }
                     }
-                    if (temp.length() < 500_000_000L) {
+                    if (temp.length() < 900_000_000L) {
                         temp.delete()
                         error("The downloaded model file is incomplete.")
                     }
@@ -99,7 +99,7 @@ class LocalAiManager(context: Context) {
                 val newEngine = Engine(
                     EngineConfig(
                         modelPath = modelFile.absolutePath,
-                        backend = Backend.GPU(),
+                        backend = Backend.CPU(),
                         cacheDir = File(appContext.cacheDir, "litert-cache").absolutePath
                     )
                 )
