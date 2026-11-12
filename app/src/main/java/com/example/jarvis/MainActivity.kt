@@ -230,7 +230,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             }
                         } else handler.postDelayed({ startWakeListening() }, 250)
                     } else if (spoken.isNotBlank()) sendMessage(spoken)
-                    else { wakeMode = true; handler.postDelayed({ startWakeListening() }, 400) }
+                    else { status.text = "VOICE STANDBY  /  TAP TO SPEAK" }
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -244,13 +244,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             speech?.startListening(intent)
         } catch (_: Exception) {
             recognitionBusy = false
-            handler.postDelayed({ if (wakeMode) startWakeListening() else startCommandListening() }, 1000)
+            status.text = "VOICE STANDBY  /  TAP TO SPEAK"
         }
     }
 
     private fun sendMessage(message: String) {
         val prompt = message.trim()
-        if (prompt.isEmpty()) { if (appActive) handler.postDelayed({ startWakeListening() }, 400); return }
+        if (prompt.isEmpty()) { status.text = "READY  /  TAP TO SPEAK"; return }
         input.setText("")
         append("YOU", prompt)
         val apiKey = try { prefs.getString("api_key", null) } catch (_: Exception) { null }
@@ -274,7 +274,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 runOnUiThread {
                     status.text = "CONNECTION ERROR  /  CHECK NETWORK"
                     append("JARVIS", "I couldn't reach the AI service. Please check your internet connection.")
-                    wakeMode = true; handler.postDelayed({ startWakeListening() }, 800)
+                    wakeMode = false; status.text = "READY  /  TAP TO SPEAK"
                 }
             }
             override fun onResponse(call: Call, response: Response) {
@@ -296,7 +296,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread {
                         status.text = "JARVIS RESPONSE  /  SPEAKING"; append("JARVIS", answer)
                         if (it.isSuccessful) tts.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
-                        else { wakeMode = true; handler.postDelayed({ startWakeListening() }, 900) }
+                        else { wakeMode = false; status.text = "READY  /  TAP TO SPEAK" }
                     }
                 }
             }
