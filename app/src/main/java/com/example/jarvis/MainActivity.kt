@@ -133,14 +133,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         page.addView(input, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(9) })
 
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        actions.addView(actionButton("VOICE / WAKE", false) { beginVoiceMode() },
+        actions.addView(actionButton("START BACKGROUND", false) { beginVoiceMode() },
             LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(5); topMargin = dp(7) })
         actions.addView(actionButton("SEND  ➤", true) { sendMessage(input.text.toString()) },
             LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5); rightMargin = dp(5); topMargin = dp(7) })
         actions.addView(actionButton("⚙", false) { showSettings() },
             LinearLayout.LayoutParams(dp(55), dp(48)).apply { leftMargin = dp(5); topMargin = dp(7) })
         page.addView(actions)
-        page.addView(smallLabel("WAKE PHRASE LISTENING WHILE THIS APP IS OPEN"),
+        page.addView(smallLabel("BACKGROUND WAKE PHRASE  /  USE NOTIFICATION TO STOP"),
             LinearLayout.LayoutParams(-1, dp(28)).apply { topMargin = dp(8) })
         setContentView(scroll)
     }
@@ -169,9 +169,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun beginVoiceMode() {
-        wakeMode = true
-        status.text = "SAY  “JARVIS”  TO ACTIVATE"
-        startWakeListening()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 41)
+            return
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 42)
+            return
+        }
+        startBackgroundService()
+    }
+
+    private fun startBackgroundService() {
+        val serviceIntent = Intent(this, VoiceForegroundService::class.java).setAction(VoiceForegroundService.ACTION_START)
+        try {
+            ContextCompat.startForegroundService(this, serviceIntent)
+            status.text = "BACKGROUND STANDBY  /  SAY JARVIS"
+            append("JARVIS", "Background voice standby has started. You can leave the app; use the persistent notification to stop listening.")
+        } catch (e: Exception) {
+            status.text = "COULD NOT START BACKGROUND VOICE"
+            append("JARVIS", "Android prevented background voice from starting: " + (e.message ?: "permission required"))
+        }
     }
     private fun startWakeListening() {
         if (!appActive || isFinishing || recognitionBusy) return
@@ -397,8 +416,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume(); appActive = true
-        if (::status.isInitialized && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
-            handler.postDelayed({ startWakeListening() }, 800)
+
     }
     override fun onPause() {
         appActive = false; handler.removeCallbacksAndMessages(null); recognitionBusy = false
@@ -407,9 +425,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 41 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
-            handler.postDelayed({ startWakeListening() }, 600)
-        else if (requestCode == 41) { status.text = "MICROPHONE PERMISSION REQUIRED"; append("JARVIS", "Please allow microphone access to use the wake phrase.") }
+        if (requestCode == 41 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 42)
+            } else startBackgroundService()
+        } else if (requestCode == 42 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            startBackgroundService()
+        } else if (requestCode == 41 || requestCode == 42) {
+            status.text = "PERMISSION REQUIRED"
+            append("JARVIS", "Please allow microphone and notification permissions for background voice standby.")
+        }
     }
     override fun onDestroy() {
         appActive = false; handler.removeCallbacksAndMessages(null); speech?.destroy()
