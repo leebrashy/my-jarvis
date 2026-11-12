@@ -23,12 +23,6 @@ import android.view.WindowManager
 import android.widget.*
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.Locale
@@ -53,14 +47,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var appActive = false
     private var wakeMode = true
     private var recognitionBusy = false
-    private val history = JSONArray()
-    private val client = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
-    private val prefs by lazy {
-        val key = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        EncryptedSharedPreferences.create(this, "jarvis_secure", key,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
-    }
+    private lateinit var localAi: LocalAiManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,6 +55,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         window.navigationBarColor = bg
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         tts = TextToSpeech(this, this)
+        localAi = LocalAiManager(this)
         buildUi()
         append("JARVIS", "Good evening. All primary systems are standing by. Say JARVIS to begin.")
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
@@ -253,77 +241,126 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (prompt.isEmpty()) { status.text = "READY  /  TAP TO SPEAK"; return }
         input.setText("")
         append("YOU", prompt)
-        val apiKey = try { prefs.getString("api_key", null) } catch (_: Exception) { null }
-        if (apiKey.isNullOrBlank()) {
-            val setup = "My AI connection is not configured yet. Please open Settings and add your OpenAI API key."
-            append("JARVIS", setup); status.text = "SETUP REQUIRED  /  OPEN SETTINGS"
-            tts.speak(setup, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply"); return
+        if (!localAi.isDownloaded()) {
+            val notice = "My on-device AI has not been downloaded yet. Open settings and download the free model to begin."
+            append("JARVIS", notice)
+            status.text = "AI MODEL REQUIRED  /  OPEN SETTINGS"
+            tts.speak(notice, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+            return
         }
-        status.text = "PROCESSING  /  ANALYSING REQUEST"
-        val msgs = JSONArray()
-        msgs.put(JSONObject().put("role", "system").put("content",
-            "You are JARVIS, a capable personal AI assistant. Speak naturally in clear British English with a calm, composed, discreet and confident manner. Be concise unless detail is requested. Be transparent about limitations and never claim to perform actions you cannot perform."))
-        for (i in 0 until history.length()) msgs.put(history.getJSONObject(i))
-        msgs.put(JSONObject().put("role", "user").put("content", prompt))
-        val body = JSONObject().put("model", "gpt-4o-mini").put("messages", msgs).put("temperature", 0.7)
-        val request = Request.Builder().url("https://api.openai.com/v1/chat/completions")
-            .addHeader("Authorization", "Bearer $apiKey").addHeader("Content-Type", "application/json")
-            .post(body.toString().toRequestBody("application/json".toMediaType())).build()
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
+        status.text = if (localAi.isReady()) "PROCESSING  /  LOCAL AI" else "STARTING LOCAL AI…"
+        localAi.load(
+            onReady = {
                 runOnUiThread {
-                    status.text = "CONNECTION ERROR  /  CHECK NETWORK"
-                    append("JARVIS", "I couldn't reach the AI service. Please check your internet connection.")
-                    wakeMode = false; status.text = "READY  /  TAP TO SPEAK"
+                    status.text = "PROCESSING  /  LOCAL AI"
+                    localAi.ask(
+                        prompt,
+                        onAnswer = { answer -> runOnUiThread {
+                            append("JARVIS", answer)
+                            status.text = "JARVIS RESPONSE  /  SPEAKING"
+                            tts.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+                        } },
+                        onError = { error -> runOnUiThread {
+                            append("JARVIS", "I encountered a problem: $error")
+                            status.text = "LOCAL AI ERROR"
+                        } }
+                    )
                 }
-            }
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val raw = it.body?.string().orEmpty()
-                    val parsed = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
-                    val answer = if (it.isSuccessful) {
-                        try { parsed.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content") }
-                        catch (_: Exception) { "I received an unexpected response. Please try again." }
-                    } else when (it.code) {
-                        401 -> "The API key was not accepted. Please check the key in Settings."
-                        429 -> "The AI service has reached a usage limit. Please check your API billing and limits."
-                        else -> "The AI service returned an error (${it.code}). Please try again."
-                    }
-                    if (it.isSuccessful) {
-                        history.put(JSONObject().put("role", "user").put("content", prompt))
-                        history.put(JSONObject().put("role", "assistant").put("content", answer))
-                    }
-                    runOnUiThread {
-                        status.text = "JARVIS RESPONSE  /  SPEAKING"; append("JARVIS", answer)
-                        if (it.isSuccessful) tts.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
-                        else { wakeMode = false; status.text = "READY  /  TAP TO SPEAK" }
-                    }
-                }
-            }
-        })
+            },
+            onError = { error -> runOnUiThread {
+                append("JARVIS", "I couldn't start the local AI: $error")
+                status.text = "AI STARTUP ERROR"
+            } }
+        )
     }
 
     private fun showSettings() {
-        val field = EditText(this).apply {
-            hint = "Paste your OpenAI API key"; inputType = 129; setSingleLine(true)
-            try { setText(prefs.getString("api_key", "")) } catch (_: Exception) {}
+        if (localAi.isDownloaded()) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("JARVIS LOCAL AI")
+                .setMessage("The free AI model is downloaded on this phone. It works without an API key or subscription. Load it now?")
+                .setPositiveButton("LOAD AI") { _, _ ->
+                    status.text = "LOADING LOCAL AI…"
+                    localAi.load(
+                        onReady = { runOnUiThread {
+                            status.text = "LOCAL AI READY"
+                            append("JARVIS", "Local intelligence is online. No API key required.")
+                        } },
+                        onError = { error -> runOnUiThread {
+                            status.text = "AI LOAD ERROR"
+                            append("JARVIS", "I couldn't load the local model: $error")
+                        } }
+                    )
+                }
+                .setNegativeButton("CLOSE", null)
+                .show()
+            return
         }
-        val note = TextView(this).apply {
-            text = "Your API key is stored encrypted on this phone. API usage is billed separately from ChatGPT and may incur charges. Never share your key."
-            textSize = 12f; setTextColor(Color.DKGRAY); setPadding(0, dp(10), 0, 0)
+
+        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            this.progress = 0
+        }
+        val message = TextView(this).apply {
+            text = "Download the free JARVIS AI model (approximately 850 MB). Wi-Fi is recommended. Once downloaded, it runs on this phone without an internet connection."
+            textSize = 13f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 0, 0, dp(12))
         }
         val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(8), dp(22), 0)
-            addView(field, LinearLayout.LayoutParams(-1, dp(52))); addView(note)
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(12), dp(22), dp(8))
+            addView(message)
+            addView(progress, LinearLayout.LayoutParams(-1, dp(12)))
         }
-        android.app.AlertDialog.Builder(this).setTitle("JARVIS AI CONNECTION").setView(box)
-            .setPositiveButton("SAVE") { _, _ ->
-                try {
-                    prefs.edit().putString("api_key", field.text.toString().trim()).apply()
-                    append("JARVIS", "Connection settings saved. Say JARVIS when you're ready.")
-                    status.text = "CONNECTION SAVED  /  READY"
-                } catch (_: Exception) { append("JARVIS", "I couldn't save the connection settings.") }
-            }.setNegativeButton("CANCEL", null).show()
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle("DOWNLOAD FREE JARVIS AI")
+            .setView(box)
+            .setPositiveButton("DOWNLOAD", null)
+            .setNegativeButton("CANCEL", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).isEnabled = false
+                message.text = "Downloading AI model… keep JARVIS open. This is a one-time download."
+                status.text = "DOWNLOADING AI MODEL…"
+                localAi.download(
+                    onProgress = { done, total ->
+                        val pct = if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 100) else 0
+                        runOnUiThread {
+                            progress.progress = pct
+                            message.text = "Downloading AI model… $pct% complete. Keep JARVIS open."
+                        }
+                    },
+                    onComplete = { ok, error ->
+                        runOnUiThread {
+                            if (ok) {
+                                message.text = "Download complete. Loading your local AI…"
+                                status.text = "AI MODEL DOWNLOADED"
+                                dialog.dismiss()
+                                localAi.load(
+                                    onReady = { runOnUiThread {
+                                        status.text = "LOCAL AI READY"
+                                        append("JARVIS", "Local intelligence is online. No API key required.")
+                                    } },
+                                    onError = { reason -> runOnUiThread {
+                                        status.text = "AI LOAD ERROR"
+                                        append("JARVIS", "The model downloaded, but could not start: $reason")
+                                    } }
+                                )
+                            } else {
+                                message.text = "Download failed: " + (error ?: "Unknown error") + ". Please try again on a stable Wi-Fi connection."
+                                status.text = "MODEL DOWNLOAD FAILED"
+                                dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                                dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).isEnabled = true
+                            }
+                        }
+                    }
+                )
+            }
+        }
+        dialog.show()
     }
 
     override fun onInit(result: Int) {
@@ -377,6 +414,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         appActive = false; handler.removeCallbacksAndMessages(null); speech?.destroy()
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
+        if (::localAi.isInitialized) localAi.close()
         super.onDestroy()
     }
 
